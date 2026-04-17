@@ -85,6 +85,14 @@
 
 #pragma mark - 视频编码
 
+// 图片压缩工具（朋友圈图片最终压缩入口）
+@interface MMImageUtil : NSObject
++ (id)compressJpegImageData:(id)a0 compressQuality:(double)a1;
++ (id)resizeToNormalCompressImage:(id)a0 CompressConfig:(id)a1;
++ (id)getNormalCompressedImage:(id)a0 CompressConfig:(id)a1;
++ (id)getDataCompressedImage:(id)a0 CompressConfig:(id)a1;
+@end
+
 // 视频编码参数（发布阶段最底层压缩开关）
 @interface VideoEncodeParams : NSObject
 @property (nonatomic) BOOL skipVideoCompress;

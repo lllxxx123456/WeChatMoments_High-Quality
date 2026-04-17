@@ -58,54 +58,140 @@ static BOOL gWCMHQLastKnownEnabled = NO;
     // 仅首次开启弹一次，后续关再开不再提示
     if ([def boolForKey:kWCMHQHasShownAlertKey]) return;
 
-    NSString *title = @"朋友圈高画质 已开启";
-
-    // 文案：段落之间用 \n\n 空行，列表每项单独一行，视觉更清晰
-    NSString *highlight = @"（可能会比官方画质高一丢丢）";
-    NSString *msg =
-        @"【使用方式】\n"
-        @"开启后，朋友圈相机菜单将多出一项\n"
-        @"「从手机相册选择（高画质）」\n"
-        @"从该项进入选图发布即走高画质流程\n"
-        @"可能会比官方画质高一丢丢\n"
-        @"走官方「从手机相册选择」不受影响\n\n"
-        @"【重要提示】\n"
-        @"如出现以下任一异常：\n"
-        @"• 微信崩溃 / 闪退\n"
-        @"• 朋友圈发布失败 / 卡死\n"
-        @"• 视频画面拉伸 / 播放异常\n"
-        @"• 图片显示错误\n\n"
-        @"请立即关闭本插件开关"
-        @"或直接卸载本插件以恢复正常使用。";
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
-                                                                   message:msg
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-
+    // 用空 message 占位，后面通过 attributedMessage 完全接管内容
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@""
+                                            message:@""
+                                     preferredStyle:UIAlertControllerStyleAlert];
 
     @try {
-        NSMutableAttributedString *attr =
-            [[NSMutableAttributedString alloc] initWithString:msg];
-        NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
-        ps.alignment = NSTextAlignmentLeft; // 多行列表项用左对齐视觉更整齐
-        ps.lineSpacing = 3;
-        ps.paragraphSpacing = 4;
-        [attr addAttribute:NSParagraphStyleAttributeName
-                     value:ps
-                     range:NSMakeRange(0, attr.length)];
-        [attr addAttribute:NSFontAttributeName
-                     value:[UIFont systemFontOfSize:13]
-                     range:NSMakeRange(0, attr.length)];
-        NSRange redRange = [msg rangeOfString:highlight];
-        if (redRange.location != NSNotFound) {
-            [attr addAttribute:NSForegroundColorAttributeName
-                         value:[UIColor systemRedColor]
-                         range:redRange];
-            [attr addAttribute:NSFontAttributeName
-                         value:[UIFont boldSystemFontOfSize:13]
-                         range:redRange];
-        }
-        [alert setValue:attr forKey:@"attributedMessage"];
+        // ── 标题富文本 ──
+        NSMutableAttributedString *titleAttr = [[NSMutableAttributedString alloc] init];
+
+        // 居中段落
+        NSMutableParagraphStyle *centerPS = [[NSMutableParagraphStyle alloc] init];
+        centerPS.alignment = NSTextAlignmentCenter;
+        centerPS.lineSpacing = 2;
+
+        NSDictionary *titleStyle = @{
+            NSFontAttributeName:            [UIFont boldSystemFontOfSize:17],
+            NSForegroundColorAttributeName: [UIColor labelColor],
+            NSParagraphStyleAttributeName:  centerPS,
+        };
+        [titleAttr appendAttributedString:
+            [[NSAttributedString alloc] initWithString:@"朋友圈高画质 已开启 ✅"
+                                            attributes:titleStyle]];
+        [alert setValue:titleAttr forKey:@"attributedTitle"];
+
+        // ── 正文富文本 ──
+        NSMutableAttributedString *body = [[NSMutableAttributedString alloc] init];
+
+        // 基础样式
+        UIFont *baseFont     = [UIFont systemFontOfSize:13];
+        UIFont *boldFont     = [UIFont boldSystemFontOfSize:13];
+        UIFont *smallFont    = [UIFont systemFontOfSize:12];
+        UIColor *textColor   = [UIColor labelColor];
+        UIColor *grayColor   = [UIColor secondaryLabelColor];
+        UIColor *accentColor = [UIColor systemBlueColor];
+        UIColor *redColor    = [UIColor systemRedColor];
+
+        // 左对齐段落
+        NSMutableParagraphStyle *leftPS = [[NSMutableParagraphStyle alloc] init];
+        leftPS.alignment       = NSTextAlignmentLeft;
+        leftPS.lineSpacing     = 4;
+        leftPS.paragraphSpacing = 2;
+
+        // 列表段落（带首行缩进）
+        NSMutableParagraphStyle *listPS = [[NSMutableParagraphStyle alloc] init];
+        listPS.alignment           = NSTextAlignmentLeft;
+        listPS.lineSpacing         = 3;
+        listPS.paragraphSpacing    = 1;
+        listPS.headIndent          = 12;
+        listPS.firstLineHeadIndent = 0;
+
+        // 红色警告段落
+        NSMutableParagraphStyle *warnPS = [[NSMutableParagraphStyle alloc] init];
+        warnPS.alignment       = NSTextAlignmentCenter;
+        warnPS.lineSpacing     = 4;
+        warnPS.paragraphSpacing = 2;
+
+        // ▎使用方式 标题
+        [body appendAttributedString:
+            [[NSAttributedString alloc] initWithString:@"使用方式\n"
+                                            attributes:@{
+                NSFontAttributeName:            boldFont,
+                NSForegroundColorAttributeName: accentColor,
+                NSParagraphStyleAttributeName:  leftPS,
+            }]];
+
+        // 使用方式内容
+        [body appendAttributedString:
+            [[NSAttributedString alloc] initWithString:
+                @"开启后，朋友圈相机菜单将多出一项：\n"
+                @"「从手机相册选择（高画质）」\n\n"
+                @"从该入口选图/选视频发布\n"
+                @"即走高画质流程\n\n"
+                @"走官方「从手机相册选择」不受影响\n\n"
+                                            attributes:@{
+                NSFontAttributeName:            baseFont,
+                NSForegroundColorAttributeName: textColor,
+                NSParagraphStyleAttributeName:  leftPS,
+            }]];
+
+        // ▎高画质效果
+        [body appendAttributedString:
+            [[NSAttributedString alloc] initWithString:@"高画质效果\n"
+                                            attributes:@{
+                NSFontAttributeName:            boldFont,
+                NSForegroundColorAttributeName: accentColor,
+                NSParagraphStyleAttributeName:  leftPS,
+            }]];
+
+        [body appendAttributedString:
+            [[NSAttributedString alloc] initWithString:
+                @"▸ 图片：保留原始分辨率 + 高质量压缩\n"
+                @"▸ 视频：保留源码率 + 跳过二次压缩\n"
+                @"▸ 实况：同时提升照片与视频部分\n\n"
+                                            attributes:@{
+                NSFontAttributeName:            baseFont,
+                NSForegroundColorAttributeName: textColor,
+                NSParagraphStyleAttributeName:  listPS,
+            }]];
+
+        // ▎注意事项 标题（红色）
+        [body appendAttributedString:
+            [[NSAttributedString alloc] initWithString:@"⚠️ 注意事项\n"
+                                            attributes:@{
+                NSFontAttributeName:            boldFont,
+                NSForegroundColorAttributeName: redColor,
+                NSParagraphStyleAttributeName:  leftPS,
+            }]];
+
+        // 异常列表
+        [body appendAttributedString:
+            [[NSAttributedString alloc] initWithString:
+                @"如出现以下任一异常：\n"
+                @"  · 微信崩溃 / 闪退\n"
+                @"  · 朋友圈发布失败 / 卡死\n"
+                @"  · 视频画面拉伸 / 播放异常\n"
+                @"  · 图片显示错误\n\n"
+                                            attributes:@{
+                NSFontAttributeName:            smallFont,
+                NSForegroundColorAttributeName: grayColor,
+                NSParagraphStyleAttributeName:  listPS,
+            }]];
+
+        // 底部红色警告
+        [body appendAttributedString:
+            [[NSAttributedString alloc] initWithString:
+                @"请立即关闭本插件开关\n或直接卸载本插件以恢复正常使用"
+                                            attributes:@{
+                NSFontAttributeName:            boldFont,
+                NSForegroundColorAttributeName: redColor,
+                NSParagraphStyleAttributeName:  warnPS,
+            }]];
+
+        [alert setValue:body forKey:@"attributedMessage"];
     } @catch (NSException *e) {}
 
     [alert addAction:[UIAlertAction actionWithTitle:@"我知道了"

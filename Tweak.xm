@@ -488,6 +488,62 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
 
 %end
 
+#pragma mark - MMImageUtil：图片压缩质量提升
+
+%hook MMImageUtil
+
+// JPEG 压缩质量：朋友圈默认 ~0.75，高画质模式提升至 0.95
++ (id)compressJpegImageData:(id)imageData compressQuality:(double)quality {
+    if (WCMHQ_enabled() && kWCMHQSessionPending && quality < 0.95) {
+        return %orig(imageData, 0.95);
+    }
+    return %orig;
+}
+
+// 图片 resize：高画质模式下保留原始尺寸（≤4096px 安全范围内跳过缩小）
++ (id)resizeToNormalCompressImage:(id)image CompressConfig:(id)config {
+    if (WCMHQ_enabled() && kWCMHQSessionPending) {
+        if ([image isKindOfClass:[UIImage class]]) {
+            UIImage *img = (UIImage *)image;
+            CGFloat maxSide = MAX(img.size.width, img.size.height);
+            if (maxSide <= 4096) {
+                return image;
+            }
+        }
+    }
+    return %orig;
+}
+
+// 普通压缩图：同上逻辑
++ (id)getNormalCompressedImage:(id)image CompressConfig:(id)config {
+    if (WCMHQ_enabled() && kWCMHQSessionPending) {
+        if ([image isKindOfClass:[UIImage class]]) {
+            UIImage *img = (UIImage *)image;
+            CGFloat maxSide = MAX(img.size.width, img.size.height);
+            if (maxSide <= 4096) {
+                return image;
+            }
+        }
+    }
+    return %orig;
+}
+
+// data 压缩图：同上逻辑
++ (id)getDataCompressedImage:(id)image CompressConfig:(id)config {
+    if (WCMHQ_enabled() && kWCMHQSessionPending) {
+        if ([image isKindOfClass:[UIImage class]]) {
+            UIImage *img = (UIImage *)image;
+            CGFloat maxSide = MAX(img.size.width, img.size.height);
+            if (maxSide <= 4096) {
+                return image;
+            }
+        }
+    }
+    return %orig;
+}
+
+%end
+
 #pragma mark - VideoEncodeParams：替换编码参数
 
 %hook VideoEncodeParams
