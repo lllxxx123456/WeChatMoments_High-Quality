@@ -88,12 +88,6 @@
 @property (copy,    nonatomic) NSString *livePhotoUUID;
 @end
 
-@interface WCNewCommitViewController (Probe)
-- (BOOL)processImage;
-- (void)postImages;
-- (void)afterProcessSingleImage;
-@end
-
 @interface WCUploadTask : NSObject
 @property (retain, nonatomic) NSMutableArray *mediaList;
 - (void)setOriginal:(BOOL)a0;
@@ -102,6 +96,9 @@
 @interface WCNewCommitViewController : UIViewController
 - (void)processUploadTask:(id)a0;
 - (void)commonUpdateWCUploadTask:(id)a0;
+- (BOOL)processImage;
+- (void)postImages;
+- (void)afterProcessSingleImage;
 @end
 
 #pragma mark - 视频编码
