@@ -636,10 +636,38 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
 %hook WCUploadMedia
 
 - (void)setBuffer:(NSData *)buffer {
+    BOOL active = (WCMHQ_enabled() && kWCMHQSessionPending);
+    NSUInteger newLen = [buffer isKindOfClass:[NSData class]] ? buffer.length : 0;
+    NSData    *jpg    = self.jpgBuffer;
+    NSUInteger jpgLen = [jpg isKindOfClass:[NSData class]] ? jpg.length : 0;
+
+    // 【根因拦截】微信在 setJpgBuffer 之后二次压缩 buffer，把高画质降级
+    //   条件：会话生效 + 已有更大的 jpgBuffer + 新 buffer 比 jpgBuffer 小 1.5 倍以上
+    //   动作：丢弃降级 buffer，改用 jpgBuffer（高画质数据）
+    BOOL hijack = (active
+                   && newLen > 0 && jpgLen > 0
+                   && jpgLen > (NSUInteger)(newLen * 1.5));
+    if (hijack) {
+        WCMHQDebugLog(@"🔥 setBuffer 劫持: %.1fKB → jpgBuffer %.1fKB (差 %.2fx)",
+                      newLen / 1024.0, jpgLen / 1024.0, (double)jpgLen / (double)newLen);
+        // 打印调用栈帮助定位真实压缩函数
+        @try {
+            NSArray *stack = [NSThread callStackSymbols];
+            NSUInteger cnt = MIN(stack.count, (NSUInteger)10);
+            NSMutableString *dump = [NSMutableString string];
+            for (NSUInteger i = 1; i < cnt; i++) {
+                [dump appendFormat:@"\n      %@", stack[i]];
+            }
+            WCMHQDebugLog(@"   栈:%@", dump);
+        } @catch (NSException *e) {}
+        %orig(jpg);
+        return;
+    }
+
     %orig;
     if ([buffer isKindOfClass:[NSData class]]) {
         WCMHQDebugLog(@"🟢 WCUploadMedia setBuffer len=%.1fKB type=%d subType=%d subMediaType=%lld",
-                      buffer.length / 1024.0,
+                      newLen / 1024.0,
                       (int)self.type, (int)self.subType, (long long)self.subMediaType);
     }
 }
