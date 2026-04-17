@@ -43,7 +43,10 @@ static BOOL gWCMHQLastKnownEnabled = NO;
     gWCMHQLastKnownEnabled = newOn;
     // 仅在开启时弹提示，关闭时静默（不打扰用户）
     if (!newOn) return;
-    dispatch_async(dispatch_get_main_queue(), ^{
+    // 延迟到 actionSheet / 收纳器页面完全收起后再弹窗，
+    // 避免与正在消失的 presenter 冲突导致弹窗一闪而过
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
         [WCMHQManager showFirstTimeAlertIfNeededInController:nil];
     });
 }
@@ -52,37 +55,59 @@ static BOOL gWCMHQLastKnownEnabled = NO;
 
 + (void)showFirstTimeAlertIfNeededInController:(UIViewController *)vc {
     NSUserDefaults *def = [NSUserDefaults standardUserDefaults];
-    BOOL hasShown = [def boolForKey:kWCMHQHasShownAlertKey];
+    // 仅首次开启弹一次，后续关再开不再提示
+    if ([def boolForKey:kWCMHQHasShownAlertKey]) return;
 
-    NSString *title;
-    NSString *msg;
+    NSString *title = @"朋友圈高画质 已开启";
 
-    if (hasShown) {
-        // 后续开启的简短提示
-        title = @"朋友圈高画质 已开启";
-        msg = @"功能已开启。\n\n"
-              @"下次发布朋友圈时，菜单中点击「从手机相册选择（高画质）」即可走高画质流程。\n\n"
-              @"如遇任何异常请及时关闭本插件开关，或直接卸载本插件即可恢复正常。";
-    } else {
-        // 首次开启的完整说明
-        title = @"朋友圈高画质 已开启";
-        msg = @"【使用方式】\n"
-              @"开启后，朋友圈相机菜单将多出一项「从手机相册选择（高画质）」，"
-              @"从该项进入选图发布即走高画质流程（可能会比官方画质高一丢丢）"
-              @"走原「从手机相册选择」不受影响。\n\n"
-              @"【重要提示】\n"
-              @"如出现以下任一异常：\n"
-              @"• 微信崩溃 / 闪退\n"
-              @"• 朋友圈发布失败 / 卡死\n"
-              @"• 视频画面拉伸 / 播放异常\n"
-              @"• 图片显示错误\n"
-              @"请立即关闭本插件开关，"
-              @"或直接卸载本插件以恢复正常使用。";
-    }
+    // 文案：段落之间用 \n\n 空行，列表每项单独一行，视觉更清晰
+    NSString *highlight = @"（可能会比官方画质高一丢丢）";
+    NSString *msg =
+        @"【使用方式】\n"
+        @"开启后，朋友圈相机菜单将多出一项"
+        @"「从手机相册选择（高画质）」，"
+        @"从该项进入选图发布即走高画质流程。\n\n"
+        @"（可能会比官方画质高一丢丢）\n\n"
+        @"走官方「从手机相册选择」不受影响。\n\n"
+        @"【重要提示】\n"
+        @"如出现以下任一异常：\n"
+        @"• 微信崩溃 / 闪退\n"
+        @"• 朋友圈发布失败 / 卡死\n"
+        @"• 视频画面拉伸 / 播放异常\n"
+        @"• 图片显示错误\n\n"
+        @"请立即关闭本插件开关，"
+        @"或直接卸载本插件以恢复正常使用。";
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:msg
                                                             preferredStyle:UIAlertControllerStyleAlert];
+
+    // 富文本：「可能会比官方画质高一丢丢」 红色加粗
+    @try {
+        NSMutableAttributedString *attr =
+            [[NSMutableAttributedString alloc] initWithString:msg];
+        NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
+        ps.alignment = NSTextAlignmentLeft; // 多行列表项用左对齐视觉更整齐
+        ps.lineSpacing = 3;
+        ps.paragraphSpacing = 4;
+        [attr addAttribute:NSParagraphStyleAttributeName
+                     value:ps
+                     range:NSMakeRange(0, attr.length)];
+        [attr addAttribute:NSFontAttributeName
+                     value:[UIFont systemFontOfSize:13]
+                     range:NSMakeRange(0, attr.length)];
+        NSRange redRange = [msg rangeOfString:highlight];
+        if (redRange.location != NSNotFound) {
+            [attr addAttribute:NSForegroundColorAttributeName
+                         value:[UIColor systemRedColor]
+                         range:redRange];
+            [attr addAttribute:NSFontAttributeName
+                         value:[UIFont boldSystemFontOfSize:13]
+                         range:redRange];
+        }
+        [alert setValue:attr forKey:@"attributedMessage"];
+    } @catch (NSException *e) {}
+
     [alert addAction:[UIAlertAction actionWithTitle:@"我知道了"
                                               style:UIAlertActionStyleDefault
                                             handler:nil]];
@@ -92,10 +117,8 @@ static BOOL gWCMHQLastKnownEnabled = NO;
         [presenter presentViewController:alert animated:YES completion:nil];
     }
 
-    if (!hasShown) {
-        [def setBool:YES forKey:kWCMHQHasShownAlertKey];
-        [def synchronize];
-    }
+    [def setBool:YES forKey:kWCMHQHasShownAlertKey];
+    [def synchronize];
 }
 
 #pragma mark - 顶层 VC 工具
