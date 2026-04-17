@@ -23,6 +23,13 @@
 - (void)actionSheet:(id)a0 clickedButtonAtIndex:(long long)a1;
 @end
 
+// 8071+ 朋友圈发布代理（showPhotoAlert 可能从此类入口）
+@interface WCTimelinePoster : NSObject
+@property (weak, nonatomic) UIViewController *viewController;
+- (void)showPhotoAlertFromViewController:(id)a0 sender:(id)a1 postReportSession:(id)a2;
+- (void)actionSheet:(id)a0 clickedButtonAtIndex:(long long)a1;
+@end
+
 #pragma mark - 选图相关
 
 @interface MMImagePickerManagerOptionObj : NSObject
@@ -96,4 +103,28 @@
 // 朋友圈视频合成器（发布阶段视频入口）
 @interface WCSightVideoCompositor : NSObject
 + (void)startWithTask:(id)a0 resultBlock:(id /* block */)a1;
+@end
+
+// 8071+ 新增视频合成器（与 WCSightVideoCompositor 相同接口，不同视频处理路径）
+@interface WCFinderVideoCompositor : NSObject
++ (void)startWithTask:(id)a0 resultBlock:(id /* block */)a1;
+@end
+
+@interface MJTemplateCompositor : NSObject
++ (void)startWithTask:(id)a0 resultBlock:(id /* block */)a1;
+@end
+
+@interface MJPublisherMovieCompositor : NSObject
++ (void)startWithTask:(id)a0 resultBlock:(id /* block */)a1;
+@end
+
+// 视频评估参数（8071+ skipVideoCompress 由 VideoEncodeParams 迁移至此类）
+@interface ABAReportPrams : NSObject
+@property (nonatomic) BOOL skipVideoCompress;
+@property (retain, nonatomic) VideoEncodeParams *videoEncodeParams;
+@end
+
+// 视频编辑逻辑控制器（skipCompress 判断入口）
+@interface EditVideoLogicController : NSObject
++ (BOOL)canSkipCompressForEncodeScene:(unsigned long long)a0;
 @end

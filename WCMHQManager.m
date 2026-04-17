@@ -64,25 +64,25 @@ static BOOL gWCMHQLastKnownEnabled = NO;
     NSString *highlight = @"（可能会比官方画质高一丢丢）";
     NSString *msg =
         @"【使用方式】\n"
-        @"开启后，朋友圈相机菜单将多出一项"
-        @"「从手机相册选择（高画质）」，"
-        @"从该项进入选图发布即走高画质流程。\n\n"
-        @"（可能会比官方画质高一丢丢）\n\n"
-        @"走官方「从手机相册选择」不受影响。\n\n"
+        @"开启后，朋友圈相机菜单将多出一项\n"
+        @"「从手机相册选择（高画质）」\n"
+        @"从该项进入选图发布即走高画质流程\n"
+        @"可能会比官方画质高一丢丢\n"
+        @"走官方「从手机相册选择」不受影响\n\n"
         @"【重要提示】\n"
         @"如出现以下任一异常：\n"
         @"• 微信崩溃 / 闪退\n"
         @"• 朋友圈发布失败 / 卡死\n"
         @"• 视频画面拉伸 / 播放异常\n"
         @"• 图片显示错误\n\n"
-        @"请立即关闭本插件开关，"
+        @"请立即关闭本插件开关"
         @"或直接卸载本插件以恢复正常使用。";
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:msg
                                                             preferredStyle:UIAlertControllerStyleAlert];
 
-    // 富文本：「可能会比官方画质高一丢丢」 红色加粗
+
     @try {
         NSMutableAttributedString *attr =
             [[NSMutableAttributedString alloc] initWithString:msg];

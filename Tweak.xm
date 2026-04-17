@@ -227,13 +227,110 @@ static void WCMHQ_hideMakeVideoBtn(UIView *view) {
     }
 }
 
+#pragma mark - 8071+ 视频信息读取 & 参数设置
+
+// 从 compositor task 对象中尝试获取源视频尺寸 & 码率
+static void WCMHQ_readSourceInfoFromTask(id task) {
+    if (!task) return;
+    @try {
+        NSURL *url = nil;
+        // 尝试多种 key 获取视频 URL（不同版本 / 不同 task 子类 key 可能不同）
+        NSArray *urlKeys = @[@"cachedEditedAssetFileURL", @"inputPath", @"outputPath"];
+        for (NSString *key in urlKeys) {
+            @try {
+                id val = [task valueForKey:key];
+                if ([val isKindOfClass:[NSURL class]]) { url = val; break; }
+            } @catch (NSException *e) {}
+        }
+        // 如果 task 有 encodeTask，也尝试从中获取
+        if (!url) {
+            @try {
+                id encodeTask = [task valueForKey:@"encodeTask"];
+                if (encodeTask) {
+                    @try {
+                        id val = [encodeTask valueForKey:@"inputPath"];
+                        if ([val isKindOfClass:[NSURL class]]) url = val;
+                    } @catch (NSException *e) {}
+                }
+            } @catch (NSException *e) {}
+        }
+        // 如果 task 有 asset 属性（AVAsset），直接读取
+        if (!url) {
+            @try {
+                id assetObj = [task valueForKey:@"asset"];
+                if ([assetObj isKindOfClass:[AVURLAsset class]]) {
+                    url = [(AVURLAsset *)assetObj URL];
+                }
+            } @catch (NSException *e) {}
+        }
+        if (!url) return;
+        AVURLAsset *avAsset = [AVURLAsset URLAssetWithURL:url options:nil];
+        NSArray *tracks = [avAsset tracksWithMediaType:AVMediaTypeVideo];
+        if (tracks.count > 0) {
+            AVAssetTrack *track = tracks[0];
+            CGSize natural = track.naturalSize;
+            CGAffineTransform tf = track.preferredTransform;
+            CGRect box = CGRectApplyAffineTransform(
+                CGRectMake(0, 0, natural.width, natural.height), tf);
+            float w = fabsf((float)CGRectGetWidth(box));
+            float h = fabsf((float)CGRectGetHeight(box));
+            if (w > 0 && h > 0) {
+                kWCMHQTargetWidth  = w;
+                kWCMHQTargetHeight = h;
+            }
+            float kbps = track.estimatedDataRate / 1000.0f;
+            if (kbps > 0) {
+                kWCMHQTargetBitrateKbps = kbps;
+            }
+        }
+    } @catch (NSException *e) {}
+}
+
+// 在 task 上设置 skipVideoCompress（兼容 8070 & 8071+）
+static void WCMHQ_setSkipCompressOnTask(id task) {
+    if (!task) return;
+    // (1) VideoEncodeParams.skipVideoCompress（8070 及更早版本）
+    @try {
+        id params = nil;
+        if ([task respondsToSelector:@selector(params)]) {
+            params = [task performSelector:@selector(params)];
+        }
+        if (params) {
+            @try { [params setValue:@YES forKey:@"skipVideoCompress"]; } @catch (NSException *e) {}
+        }
+    } @catch (NSException *e) {}
+    // (2) ABAReportPrams.skipVideoCompress（8071+）
+    @try {
+        id abaParams = nil;
+        if ([task respondsToSelector:@selector(videoScoreParams)]) {
+            abaParams = [task performSelector:@selector(videoScoreParams)];
+        }
+        if (abaParams) {
+            @try { [abaParams setValue:@YES forKey:@"skipVideoCompress"]; } @catch (NSException *e) {}
+        }
+    } @catch (NSException *e) {}
+}
+
+// 合成器统一预处理：读取源视频信息 + 设置 skipVideoCompress
+static void WCMHQ_compositorPreProcess(id task) {
+    kWCMHQTargetWidth        = 0.0f;
+    kWCMHQTargetHeight       = 0.0f;
+    kWCMHQTargetBitrateKbps  = 0.0f;
+    BOOL active = WCMHQ_enabled() && kWCMHQSessionPending;
+    if (!active || !task) return;
+    WCMHQ_readSourceInfoFromTask(task);
+    WCMHQ_setSkipCompressOnTask(task);
+}
+
 #pragma mark - 朋友圈菜单注入
 
 // 在朋友圈相机/上传菜单内注入：
 //   (a) 朋友圈高画质 开关条目
 //   (b) 当开启时再注入 "从手机相册选择（高画质）" 入口
-static void WCMHQ_injectMomentsMenu(WCTimeLineViewController *vc) {
-    if (!vc) return;
+// actionTarget: 响应 actionSheet:clickedButtonAtIndex: 的对象（WCTimeLineViewController / WCTimelinePoster）
+// markVC:       用于 WCMHQ_markForceFor 的 UIViewController（MMImagePickerManager 会收到此 VC）
+static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
+    if (!actionTarget || !markVC) return;
     Class sheetCls = objc_getClass("WCActionSheet");
     if (!sheetCls) return;
     WCActionSheet *sheet = [sheetCls getCurrentShowingActionSheet];
@@ -261,20 +358,24 @@ static void WCMHQ_injectMomentsMenu(WCTimeLineViewController *vc) {
     if (enabled && !WCMHQ_sheetContainsTitle(sheet, kWCMHQAlbumMenuTitle)) {
         NSInteger albumIdx = WCMHQ_albumIndex(sheet);
         if (albumIdx != NSNotFound) {
-            __weak WCTimeLineViewController *weakVC = vc;
+            __weak id weakTarget = actionTarget;
+            __weak UIViewController *weakVC = markVC;
             __weak WCActionSheet *weakSheet = sheet;
             [sheet addButtonWithTitle:kWCMHQAlbumMenuTitle eventAction:^{
-                WCTimeLineViewController *strongVC = weakVC;
+                id strongTarget = weakTarget;
+                UIViewController *strongVC = weakVC;
                 WCActionSheet *strongSheet = weakSheet
                     ?: [objc_getClass("WCActionSheet") getCurrentShowingActionSheet];
-                if (!strongVC || !strongSheet) return;
-                WCMHQ_markForceFor((UIViewController *)strongVC, YES);
+                if (!strongTarget || !strongVC || !strongSheet) return;
+                WCMHQ_markForceFor(strongVC, YES);
                 @try {
                     NSInteger ti = WCMHQ_albumIndex(strongSheet);
                     if (ti == NSNotFound) ti = albumIdx;
-                    [strongVC actionSheet:strongSheet clickedButtonAtIndex:(long long)ti];
+                    if ([strongTarget respondsToSelector:@selector(actionSheet:clickedButtonAtIndex:)]) {
+                        [strongTarget actionSheet:strongSheet clickedButtonAtIndex:(long long)ti];
+                    }
                 } @catch (NSException *e) {
-                    WCMHQ_markForceFor((UIViewController *)strongVC, NO);
+                    WCMHQ_markForceFor(strongVC, NO);
                 }
             }];
         }
@@ -290,15 +391,42 @@ static void WCMHQ_injectMomentsMenu(WCTimeLineViewController *vc) {
 - (void)showPhotoAlert:(id)arg1 {
     %orig;
     dispatch_async(dispatch_get_main_queue(), ^{
-        WCMHQ_injectMomentsMenu(self);
+        WCMHQ_injectMomentsMenu(self, self);
     });
 }
 
 - (void)showUploadOption:(id)arg1 {
     %orig;
     dispatch_async(dispatch_get_main_queue(), ^{
-        WCMHQ_injectMomentsMenu(self);
+        WCMHQ_injectMomentsMenu(self, self);
     });
+}
+
+%end
+
+#pragma mark - WCTimelinePoster：8071+ 朋友圈发布入口
+
+%hook WCTimelinePoster
+
+- (void)showPhotoAlertFromViewController:(id)viewController sender:(id)sender postReportSession:(id)session {
+    %orig;
+    __weak id weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        id strongSelf = weakSelf;
+        if (!strongSelf) return;
+        UIViewController *vc = nil;
+        @try { vc = [strongSelf valueForKey:@"viewController"]; } @catch (NSException *e) {}
+        if (!vc && [viewController isKindOfClass:[UIViewController class]]) {
+            vc = (UIViewController *)viewController;
+        }
+        if (vc) {
+            WCMHQ_injectMomentsMenu(strongSelf, vc);
+        }
+    });
+}
+
+- (void)actionSheet:(id)sheet clickedButtonAtIndex:(long long)idx {
+    %orig;
 }
 
 %end
@@ -432,50 +560,36 @@ static void WCMHQ_injectMomentsMenu(WCTimeLineViewController *vc) {
 %hook WCSightVideoCompositor
 
 + (void)startWithTask:(id)task resultBlock:(id)resultBlock {
-    BOOL active = WCMHQ_enabled() && kWCMHQSessionPending;
-    // 每次合成前清空，避免上一会话残留
-    kWCMHQTargetWidth        = 0.0f;
-    kWCMHQTargetHeight       = 0.0f;
-    kWCMHQTargetBitrateKbps  = 0.0f;
-    if (active && task) {
-        @try {
-            id urlObj = nil;
-            @try { urlObj = [task valueForKey:@"cachedEditedAssetFileURL"]; } @catch (NSException *e) {}
-            if ([urlObj isKindOfClass:[NSURL class]]) {
-                NSURL *url = (NSURL *)urlObj;
-                AVURLAsset *avAsset = [AVURLAsset URLAssetWithURL:url options:nil];
-                NSArray *tracks = [avAsset tracksWithMediaType:AVMediaTypeVideo];
-                if (tracks.count > 0) {
-                    AVAssetTrack *track = tracks[0];
-                    CGSize natural = track.naturalSize;
-                    CGAffineTransform tf = track.preferredTransform;
-                    // 应用 transform，得到旋转后的真实展示尺寸
-                    CGRect box = CGRectApplyAffineTransform(
-                        CGRectMake(0, 0, natural.width, natural.height), tf);
-                    float w = fabsf((float)CGRectGetWidth(box));
-                    float h = fabsf((float)CGRectGetHeight(box));
-                    if (w > 0 && h > 0) {
-                        kWCMHQTargetWidth  = w;
-                        kWCMHQTargetHeight = h;
-                    }
-                    // estimatedDataRate 单位 bps，换算 kbps
-                    float kbps = track.estimatedDataRate / 1000.0f;
-                    if (kbps > 0) {
-                        kWCMHQTargetBitrateKbps = kbps;
-                    }
-                }
-            }
-        } @catch (NSException *e) {}
-        @try {
-            id params = nil;
-            if ([task respondsToSelector:@selector(params)]) {
-                params = [task performSelector:@selector(params)];
-            }
-            if (params) {
-                @try { [params setValue:@YES forKey:@"skipVideoCompress"]; } @catch (NSException *e) {}
-            }
-        } @catch (NSException *e) {}
-    }
+    WCMHQ_compositorPreProcess(task);
+    %orig;
+}
+
+%end
+
+#pragma mark - 8071+ 新增合成器：同样拦截读取源视频信息
+
+%hook WCFinderVideoCompositor
+
++ (void)startWithTask:(id)task resultBlock:(id)resultBlock {
+    WCMHQ_compositorPreProcess(task);
+    %orig;
+}
+
+%end
+
+%hook MJTemplateCompositor
+
++ (void)startWithTask:(id)task resultBlock:(id)resultBlock {
+    WCMHQ_compositorPreProcess(task);
+    %orig;
+}
+
+%end
+
+%hook MJPublisherMovieCompositor
+
++ (void)startWithTask:(id)task resultBlock:(id)resultBlock {
+    WCMHQ_compositorPreProcess(task);
     %orig;
 }
 
@@ -515,15 +629,41 @@ static void WCMHQ_injectMomentsMenu(WCTimeLineViewController *vc) {
 
 - (void)exportAsynchronouslyWithCompletionHandler:(id)handler {
     if (WCMHQ_enabled() && kWCMHQSessionPending) {
-        @try {
-            id params = [self respondsToSelector:@selector(params)]
-                ? [self performSelector:@selector(params)] : nil;
-            if (params) {
-                @try { [params setValue:@YES forKey:@"skipVideoCompress"]; } @catch (NSException *e) {}
-            }
-        } @catch (NSException *e) {}
+        // 设置 skipVideoCompress（兼容 VideoEncodeParams & ABAReportPrams）
+        WCMHQ_setSkipCompressOnTask(self);
+        // 合成器未获取到源视频信息时，从 encodeTask 自身补读
+        if (kWCMHQTargetWidth <= 0 || kWCMHQTargetHeight <= 0) {
+            WCMHQ_readSourceInfoFromTask(self);
+        }
     }
     %orig;
+}
+
+%end
+
+#pragma mark - ABAReportPrams：8071+ skipVideoCompress 拦截
+
+%hook ABAReportPrams
+
+- (void)setSkipVideoCompress:(BOOL)skipVideoCompress {
+    if (WCMHQ_enabled() && kWCMHQSessionPending) {
+        %orig(YES);
+    } else {
+        %orig;
+    }
+}
+
+%end
+
+#pragma mark - EditVideoLogicController：视频压缩判断入口
+
+%hook EditVideoLogicController
+
++ (BOOL)canSkipCompressForEncodeScene:(unsigned long long)scene {
+    if (WCMHQ_enabled() && kWCMHQSessionPending) {
+        return YES;
+    }
+    return %orig;
 }
 
 %end
