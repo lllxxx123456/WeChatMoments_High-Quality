@@ -661,6 +661,11 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
             WCMHQDebugLog(@"   栈:%@", dump);
         } @catch (NSException *e) {}
         %orig(jpg);
+        // 同步 fileSize 到劫持后的真实大小，避免服务器校验失败
+        @try {
+            self.fileSize = (long long)jpgLen;
+            WCMHQDebugLog(@"   同步 fileSize=%.1fKB（防止服务器校验失败）", jpgLen / 1024.0);
+        } @catch (NSException *e) {}
         return;
     }
 
