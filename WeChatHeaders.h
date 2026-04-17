@@ -48,6 +48,11 @@
 
 @interface MMAsset : NSObject
 @property (nonatomic) BOOL m_isNeedOriginImage;
+- (BOOL)isLivePhoto;
+- (void)getBigImageWithCompressConfig:(id)a0 ProcessBlock:(id /* block */)a1 ResultBlock:(id /* block */)a2 ErrorBlock:(id /* block */)a3;
+- (void)getHighResolutionImageWithCompressConfig:(id)a0 ProcessBlock:(id /* block */)a1 ResultBlock:(id /* block */)a2 ErrorBlock:(id /* block */)a3 FaceCountBlock:(id /* block */)a4;
+- (void)asyncImageOriginSourceData:(id /* block */)a0 errorBlock:(id /* block */)a1;
+- (void)asyncImageOriginData:(BOOL)a0 completion:(id /* block */)a1 errorBlock:(id /* block */)a2;
 @end
 
 @interface MMAssetInfo : NSObject
@@ -71,6 +76,22 @@
 
 @interface WCUploadMedia : NSObject
 @property (nonatomic) BOOL skipCompress;
+@property (retain, nonatomic) NSData   *buffer;
+@property (retain, nonatomic) NSData   *jpgBuffer;
+@property (retain, nonatomic) NSData   *hdAlbumImgData;
+@property (retain, nonatomic) NSString *mediaSourcePath;
+@property (nonatomic) CGSize            imgSize;
+@property (nonatomic) long long         fileSize;
+@property (nonatomic) int               type;
+@property (nonatomic) int               subType;
+@property (nonatomic) long long         subMediaType;
+@property (copy,    nonatomic) NSString *livePhotoUUID;
+@end
+
+@interface WCNewCommitViewController (Probe)
+- (BOOL)processImage;
+- (void)postImages;
+- (void)afterProcessSingleImage;
 @end
 
 @interface WCUploadTask : NSObject

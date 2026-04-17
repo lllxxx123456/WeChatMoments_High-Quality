@@ -25,8 +25,13 @@ NS_ASSUME_NONNULL_BEGIN
 @interface WCMHQManager : NSObject
 
 // 开关读写（默认 NO）
+// 权威存储位于独立 suite NSUserDefaults（com.wcmhq.prefs），防止被微信 plist / WCPluginsMgr 覆盖重置
 + (BOOL)isEnabled;
 + (void)setEnabled:(BOOL)enabled;
+
+// 启动时调用：把 suite 权威值强制同步回 standardUserDefaults
+// 用于对抗 WCPluginsMgr registerSwitch 或微信启动时对 kWCMHQEnabled 的重置
++ (void)syncAuthoritativeValueToStandard;
 
 // 启动开关变化监听（幂等，重复调用安全）
 // 开启后：任意来源（插件收纳器 / 朋友圈菜单 / 外部写入 NSUserDefaults）

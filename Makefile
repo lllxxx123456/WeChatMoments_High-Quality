@@ -6,7 +6,7 @@ INSTALL_TARGET_PROCESSES = WeChat
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = WeChatMomentsHQ
-WeChatMomentsHQ_FILES = Tweak.xm WCMHQManager.m
+WeChatMomentsHQ_FILES = Tweak.xm WCMHQManager.m WCMHQDebugPanel.m
 WeChatMomentsHQ_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 WeChatMomentsHQ_FRAMEWORKS = UIKit Foundation AVFoundation Photos CoreGraphics
 

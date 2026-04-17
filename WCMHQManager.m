@@ -5,23 +5,53 @@
 
 static NSString *const kWCMHQEnabledKey       = @"WCMHQEnabled";
 static NSString *const kWCMHQHasShownAlertKey = @"WCMHQHasShownAlert";
+static NSString *const kWCMHQSuiteName        = @"com.wcmhq.prefs";
 
 // 开关变化监听状态（静态变量）
 static BOOL gWCMHQObservingStarted = NO;
 static BOOL gWCMHQLastKnownEnabled = NO;
+
+// 独立 suite NSUserDefaults：作为权威存储源，避免被微信 plist 或 WCPluginsMgr 覆盖
+static NSUserDefaults *WCMHQ_suiteDefaults(void) {
+    static NSUserDefaults *suite = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        suite = [[NSUserDefaults alloc] initWithSuiteName:kWCMHQSuiteName];
+        if (!suite) suite = [NSUserDefaults standardUserDefaults];
+    });
+    return suite;
+}
 
 @implementation WCMHQManager
 
 #pragma mark - 开关读写
 
 + (BOOL)isEnabled {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:kWCMHQEnabledKey];
+    NSUserDefaults *suite = WCMHQ_suiteDefaults();
+    // suite 有值 → 以 suite 为准（权威源）
+    if ([suite objectForKey:kWCMHQEnabledKey] != nil) {
+        return [suite boolForKey:kWCMHQEnabledKey];
+    }
+    // suite 没值 → 迁移 standardUserDefaults 的旧值过来
+    BOOL legacy = [[NSUserDefaults standardUserDefaults] boolForKey:kWCMHQEnabledKey];
+    [suite setBool:legacy forKey:kWCMHQEnabledKey];
+    return legacy;
 }
 
 + (void)setEnabled:(BOOL)enabled {
+    // 权威源：suite
+    [WCMHQ_suiteDefaults() setBool:enabled forKey:kWCMHQEnabledKey];
+    // 同步 standard：供 WCPluginsMgr / 第三方脚本读取到正确状态
     NSUserDefaults *def = [NSUserDefaults standardUserDefaults];
     [def setBool:enabled forKey:kWCMHQEnabledKey];
     [def synchronize];
+}
+
+// 供 %ctor 调用：把 suite 里的权威值强制写回 standard
+// 用于对抗 WCPluginsMgr registerSwitch 时可能把 key 重置为 default
++ (void)syncAuthoritativeValueToStandard {
+    BOOL on = [self isEnabled];
+    [[NSUserDefaults standardUserDefaults] setBool:on forKey:kWCMHQEnabledKey];
 }
 
 #pragma mark - 开关变化监听（插件收纳器等外部来源）
@@ -38,6 +68,16 @@ static BOOL gWCMHQLastKnownEnabled = NO;
 }
 
 + (void)_wcmhq_userDefaultsDidChange:(NSNotification *)note {
+    // 外部（WCPluginsMgr / 插件菜单）改写 standard 时，同步到 suite 作为权威源
+    NSUserDefaults *stdDef = [NSUserDefaults standardUserDefaults];
+    BOOL stdOn  = [stdDef boolForKey:kWCMHQEnabledKey];
+    NSUserDefaults *suite = WCMHQ_suiteDefaults();
+    BOOL suiteOn = [suite boolForKey:kWCMHQEnabledKey];
+    if (stdOn != suiteOn) {
+        // 以 standard 的新值为用户意图（因为外部组件通常写 standard）
+        [suite setBool:stdOn forKey:kWCMHQEnabledKey];
+    }
+
     BOOL newOn = [self isEnabled];
     if (newOn == gWCMHQLastKnownEnabled) return;
     gWCMHQLastKnownEnabled = newOn;
@@ -136,26 +176,6 @@ static BOOL gWCMHQLastKnownEnabled = NO;
                 NSFontAttributeName:            baseFont,
                 NSForegroundColorAttributeName: textColor,
                 NSParagraphStyleAttributeName:  leftPS,
-            }]];
-
-        // ▎高画质效果
-        [body appendAttributedString:
-            [[NSAttributedString alloc] initWithString:@"高画质效果\n"
-                                            attributes:@{
-                NSFontAttributeName:            boldFont,
-                NSForegroundColorAttributeName: accentColor,
-                NSParagraphStyleAttributeName:  leftPS,
-            }]];
-
-        [body appendAttributedString:
-            [[NSAttributedString alloc] initWithString:
-                @"▸ 图片：保留原始分辨率 + 高质量压缩\n"
-                @"▸ 视频：保留源码率 + 跳过二次压缩\n"
-                @"▸ 实况：同时提升照片与视频部分\n\n"
-                                            attributes:@{
-                NSFontAttributeName:            baseFont,
-                NSForegroundColorAttributeName: textColor,
-                NSParagraphStyleAttributeName:  listPS,
             }]];
 
         // ▎注意事项 标题（红色）

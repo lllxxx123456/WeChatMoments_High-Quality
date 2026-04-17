@@ -13,6 +13,7 @@
 
 #import "WeChatHeaders.h"
 #import "WCMHQManager.h"
+#import "WCMHQDebugPanel.h"
 
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -354,6 +355,16 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
         }];
     }
 
+    // (b-0) 压缩调试面板切换：开启开关时总注入
+    if (enabled && !WCMHQ_sheetContainsSubstring(sheet, @"压缩调试面板")) {
+        NSString *dbgTitle = [WCMHQDebugPanel isVisible]
+            ? @"压缩调试面板：已开启（点击关闭）"
+            : @"压缩调试面板：未开启（点击开启）";
+        [sheet addButtonWithTitle:dbgTitle eventAction:^{
+            [WCMHQDebugPanel toggle];
+        }];
+    }
+
     // (b) 高画质入口（仅开启时注入）
     if (enabled && !WCMHQ_sheetContainsTitle(sheet, kWCMHQAlbumMenuTitle)) {
         NSInteger albumIdx = WCMHQ_albumIndex(sheet);
@@ -438,8 +449,12 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
 - (void)viewWillDisappear:(BOOL)animated {
     %orig;
     // 离开发布页延迟 6 秒重置会话，确保所有压缩 hook 还来得及执行
+    WCMHQDebugLog(@"⚫ WCNewCommitVC viewWillDisappear：6s 后关闭会话");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
+        if (kWCMHQSessionPending) {
+            WCMHQDebugLog(@"⚫ 会话关闭 kWCMHQSessionPending=NO");
+        }
         kWCMHQSessionPending = NO;
     });
 }
@@ -494,52 +509,201 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
 
 // JPEG 压缩质量：朋友圈默认 ~0.75，高画质模式提升至 0.95
 + (id)compressJpegImageData:(id)imageData compressQuality:(double)quality {
-    if (WCMHQ_enabled() && kWCMHQSessionPending && quality < 0.95) {
-        return %orig(imageData, 0.95);
+    NSUInteger inLen = [imageData isKindOfClass:[NSData class]] ? [(NSData *)imageData length] : 0;
+    BOOL active = (WCMHQ_enabled() && kWCMHQSessionPending);
+    id result;
+    if (active && quality < 0.95) {
+        result = %orig(imageData, 0.95);
+    } else {
+        result = %orig;
     }
-    return %orig;
+    NSUInteger outLen = [result isKindOfClass:[NSData class]] ? [(NSData *)result length] : 0;
+    WCMHQDebugLog(@"🟡 MMImageUtil compressJpeg q=%.2f → %.2f in=%.1fKB out=%.1fKB session=%d",
+                  quality, active && quality < 0.95 ? 0.95 : quality,
+                  inLen / 1024.0, outLen / 1024.0, active);
+    return result;
 }
 
 // 图片 resize：高画质模式下保留原始尺寸（≤4096px 安全范围内跳过缩小）
 + (id)resizeToNormalCompressImage:(id)image CompressConfig:(id)config {
-    if (WCMHQ_enabled() && kWCMHQSessionPending) {
-        if ([image isKindOfClass:[UIImage class]]) {
-            UIImage *img = (UIImage *)image;
-            CGFloat maxSide = MAX(img.size.width, img.size.height);
-            if (maxSide <= 4096) {
-                return image;
-            }
-        }
+    CGSize inSz = CGSizeZero;
+    if ([image isKindOfClass:[UIImage class]]) inSz = ((UIImage *)image).size;
+    BOOL active = (WCMHQ_enabled() && kWCMHQSessionPending);
+    BOOL skip = NO;
+    id result;
+    if (active && [image isKindOfClass:[UIImage class]]) {
+        CGFloat maxSide = MAX(inSz.width, inSz.height);
+        if (maxSide <= 4096) { result = image; skip = YES; }
+        else { result = %orig; }
+    } else {
+        result = %orig;
     }
-    return %orig;
+    CGSize outSz = CGSizeZero;
+    if ([result isKindOfClass:[UIImage class]]) outSz = ((UIImage *)result).size;
+    WCMHQDebugLog(@"🟠 MMImageUtil resizeNormal in=%.0fx%.0f → out=%.0fx%.0f skip=%d cfg=%@",
+                  inSz.width, inSz.height, outSz.width, outSz.height, skip,
+                  NSStringFromClass([config class]) ?: @"nil");
+    return result;
 }
 
 // 普通压缩图：同上逻辑
 + (id)getNormalCompressedImage:(id)image CompressConfig:(id)config {
-    if (WCMHQ_enabled() && kWCMHQSessionPending) {
-        if ([image isKindOfClass:[UIImage class]]) {
-            UIImage *img = (UIImage *)image;
-            CGFloat maxSide = MAX(img.size.width, img.size.height);
-            if (maxSide <= 4096) {
-                return image;
-            }
-        }
+    CGSize inSz = CGSizeZero;
+    if ([image isKindOfClass:[UIImage class]]) inSz = ((UIImage *)image).size;
+    BOOL active = (WCMHQ_enabled() && kWCMHQSessionPending);
+    BOOL skip = NO;
+    id result;
+    if (active && [image isKindOfClass:[UIImage class]]) {
+        CGFloat maxSide = MAX(inSz.width, inSz.height);
+        if (maxSide <= 4096) { result = image; skip = YES; }
+        else { result = %orig; }
+    } else {
+        result = %orig;
     }
-    return %orig;
+    CGSize outSz = CGSizeZero;
+    if ([result isKindOfClass:[UIImage class]]) outSz = ((UIImage *)result).size;
+    WCMHQDebugLog(@"🟠 MMImageUtil getNormalCompressed in=%.0fx%.0f → out=%.0fx%.0f skip=%d cfg=%@",
+                  inSz.width, inSz.height, outSz.width, outSz.height, skip,
+                  NSStringFromClass([config class]) ?: @"nil");
+    return result;
 }
 
 // data 压缩图：同上逻辑
 + (id)getDataCompressedImage:(id)image CompressConfig:(id)config {
-    if (WCMHQ_enabled() && kWCMHQSessionPending) {
-        if ([image isKindOfClass:[UIImage class]]) {
-            UIImage *img = (UIImage *)image;
-            CGFloat maxSide = MAX(img.size.width, img.size.height);
-            if (maxSide <= 4096) {
-                return image;
-            }
-        }
+    CGSize inSz = CGSizeZero;
+    if ([image isKindOfClass:[UIImage class]]) inSz = ((UIImage *)image).size;
+    BOOL active = (WCMHQ_enabled() && kWCMHQSessionPending);
+    BOOL skip = NO;
+    id result;
+    if (active && [image isKindOfClass:[UIImage class]]) {
+        CGFloat maxSide = MAX(inSz.width, inSz.height);
+        if (maxSide <= 4096) { result = image; skip = YES; }
+        else { result = %orig; }
+    } else {
+        result = %orig;
     }
-    return %orig;
+    CGSize outSz = CGSizeZero;
+    if ([result isKindOfClass:[UIImage class]]) outSz = ((UIImage *)result).size;
+    WCMHQDebugLog(@"🟠 MMImageUtil getDataCompressed in=%.0fx%.0f → out=%.0fx%.0f skip=%d cfg=%@",
+                  inSz.width, inSz.height, outSz.width, outSz.height, skip,
+                  NSStringFromClass([config class]) ?: @"nil");
+    return result;
+}
+
+%end
+
+#pragma mark - 【探查】MMAsset：图片取数路径
+
+%hook MMAsset
+
+- (void)getBigImageWithCompressConfig:(id)cfg
+                         ProcessBlock:(id)pb
+                          ResultBlock:(id)rb
+                           ErrorBlock:(id)eb {
+    BOOL active = (WCMHQ_enabled() && kWCMHQSessionPending);
+    WCMHQDebugLog(@"🔵 MMAsset getBigImage cfg=%@ session=%d isLive=%d",
+                  NSStringFromClass([cfg class]) ?: @"nil",
+                  active,
+                  [self respondsToSelector:@selector(isLivePhoto)] ? (int)[self isLivePhoto] : -1);
+    %orig;
+}
+
+- (void)getHighResolutionImageWithCompressConfig:(id)cfg
+                                    ProcessBlock:(id)pb
+                                     ResultBlock:(id)rb
+                                      ErrorBlock:(id)eb
+                                  FaceCountBlock:(id)fb {
+    BOOL active = (WCMHQ_enabled() && kWCMHQSessionPending);
+    WCMHQDebugLog(@"🔵 MMAsset getHighResImage cfg=%@ session=%d",
+                  NSStringFromClass([cfg class]) ?: @"nil", active);
+    %orig;
+}
+
+- (void)asyncImageOriginSourceData:(id)completion errorBlock:(id)errorBlock {
+    WCMHQDebugLog(@"🔵 MMAsset asyncImageOriginSourceData (原始数据通道)");
+    %orig;
+}
+
+- (void)asyncImageOriginData:(BOOL)flag completion:(id)completion errorBlock:(id)errorBlock {
+    WCMHQDebugLog(@"🔵 MMAsset asyncImageOriginData flag=%d", flag);
+    %orig;
+}
+
+%end
+
+#pragma mark - 【探查】WCUploadMedia：发布前最终 buffer
+
+%hook WCUploadMedia
+
+- (void)setBuffer:(NSData *)buffer {
+    %orig;
+    if ([buffer isKindOfClass:[NSData class]]) {
+        WCMHQDebugLog(@"🟢 WCUploadMedia setBuffer len=%.1fKB type=%d subType=%d subMediaType=%lld",
+                      buffer.length / 1024.0,
+                      (int)self.type, (int)self.subType, (long long)self.subMediaType);
+    }
+}
+
+- (void)setJpgBuffer:(NSData *)jpgBuffer {
+    %orig;
+    if ([jpgBuffer isKindOfClass:[NSData class]]) {
+        WCMHQDebugLog(@"🟢 WCUploadMedia setJpgBuffer len=%.1fKB imgSize=%.0fx%.0f",
+                      jpgBuffer.length / 1024.0,
+                      self.imgSize.width, self.imgSize.height);
+    }
+}
+
+- (void)setHdAlbumImgData:(NSData *)data {
+    %orig;
+    if ([data isKindOfClass:[NSData class]]) {
+        WCMHQDebugLog(@"🟢 WCUploadMedia setHdAlbumImgData len=%.1fKB",
+                      data.length / 1024.0);
+    }
+}
+
+- (void)setMediaSourcePath:(NSString *)path {
+    %orig;
+    if ([path isKindOfClass:[NSString class]] && path.length > 0) {
+        unsigned long long fsz = 0;
+        NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+        if (attrs) fsz = [attrs fileSize];
+        WCMHQDebugLog(@"🟢 WCUploadMedia setMediaSourcePath %.1fKB → %@",
+                      fsz / 1024.0, path.lastPathComponent ?: @"");
+    }
+}
+
+- (void)setImgSize:(CGSize)size {
+    %orig;
+    WCMHQDebugLog(@"🟢 WCUploadMedia setImgSize %.0fx%.0f", size.width, size.height);
+}
+
+- (void)setFileSize:(long long)fileSize {
+    %orig;
+    WCMHQDebugLog(@"🟢 WCUploadMedia setFileSize %.1fKB", fileSize / 1024.0);
+}
+
+%end
+
+#pragma mark - 【探查】WCNewCommitViewController：图片发布流程
+
+%hook WCNewCommitViewController
+
+- (BOOL)processImage {
+    WCMHQDebugLog(@"📤 WCNewCommitVC processImage 开始 session=%d",
+                  (WCMHQ_enabled() && kWCMHQSessionPending));
+    BOOL r = %orig;
+    WCMHQDebugLog(@"📤 WCNewCommitVC processImage 结束 → %d", r);
+    return r;
+}
+
+- (void)postImages {
+    WCMHQDebugLog(@"📤 WCNewCommitVC postImages 调用");
+    %orig;
+}
+
+- (void)afterProcessSingleImage {
+    WCMHQDebugLog(@"📤 WCNewCommitVC afterProcessSingleImage");
+    %orig;
 }
 
 %end
@@ -735,6 +899,7 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
         UIViewController *vc = (UIViewController *)arg2;
         if (WCMHQ_shouldForceFor(vc)) {
             kWCMHQSessionPending = YES;
+            WCMHQDebugLog(@"⭐ 会话开启（+showWithOptionObj） kWCMHQSessionPending=YES");
             WCMHQ_applyPickerOptions((MMImagePickerManagerOptionObj *)arg1);
             WCMHQ_markForceFor(vc, NO);
         }
@@ -749,6 +914,7 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
         UIViewController *vc = (UIViewController *)arg2;
         if (WCMHQ_shouldForceFor(vc)) {
             kWCMHQSessionPending = YES;
+            WCMHQDebugLog(@"⭐ 会话开启（-showWithOptionObj:delegate:） kWCMHQSessionPending=YES");
             WCMHQ_applyPickerOptions((MMImagePickerManagerOptionObj *)arg1);
             WCMHQ_markForceFor(vc, NO);
         }
@@ -804,6 +970,9 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
 
 - (void)OnCancel:(id)arg1 {
     // 用户取消选图：重置会话避免后续误命中
+    if (kWCMHQSessionPending) {
+        WCMHQDebugLog(@"⚫ 用户取消选图 kWCMHQSessionPending=NO");
+    }
     kWCMHQSessionPending = NO;
     WCMHQ_markForceFor((UIViewController *)self, NO);
     %orig;
@@ -835,6 +1004,10 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
         // 启动开关变化监听：任何来源切换 WCMHQEnabled 都会自动弹出首次/关闭提示
         [WCMHQManager startObservingSwitchChanges];
 
+        // 覆盖安装/启动后的第一步：把 suite 里的权威值强制写入 standard
+        // —— 这样即使微信主 plist 被重置为默认值，tweak 仍然能恢复用户上次的开关
+        [WCMHQManager syncAuthoritativeValueToStandard];
+
         // 适配"WCPluginsMgr"插件收纳器：只有一个开关，使用 registerSwitchWithTitle:key:
         if (NSClassFromString(@"WCPluginsMgr")) {
             @try {
@@ -843,5 +1016,18 @@ static void WCMHQ_injectMomentsMenu(id actionTarget, UIViewController *markVC) {
                                         key:@"WCMHQEnabled"];
             } @catch (NSException *e) {}
         }
+
+        // registerSwitch 之后再次强写 standard，防止 WCPluginsMgr 把 key 重置
+        [WCMHQManager syncAuthoritativeValueToStandard];
+
+        // 主 runloop 就绪后延迟再写一次，覆盖任何晚到的默认值初始化
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [WCMHQManager syncAuthoritativeValueToStandard];
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [WCMHQManager syncAuthoritativeValueToStandard];
+        });
     }
 }
